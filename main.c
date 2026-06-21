@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -11,15 +12,15 @@ struct note {
 };
 
 void write_u16_le(FILE *f, uint16_t x) {
-    fputc(x & 0xff, f);
-    fputc((x >> 8) & 0xff, f);
+	fputc(x & 0xff, f);
+	fputc((x >> 8) & 0xff, f);
 }
 
 void write_u32_le(FILE *f, uint32_t x) {
-    fputc(x & 0xff, f);
-    fputc((x >> 8) & 0xff, f);
-    fputc((x >> 16) & 0xff, f);
-    fputc((x >> 24) & 0xff, f);
+	fputc(x & 0xff, f);
+	fputc((x >> 8) & 0xff, f);
+	fputc((x >> 16) & 0xff, f);
+	fputc((x >> 24) & 0xff, f);
 }
 
 double envelope(int sample, int len, double rate) {
@@ -97,33 +98,118 @@ void generate_audio(int16_t * datas, double start, int sample_rate, int len, str
 	}
 }
 
+double lookup_base_freq_4(int note, int accidental) {
+	// this whole function is just copy-pasted from some tiny AI model
+	// because i never learned how music works
+	// i will replace it with my own code once i learn music lol
+	// for now, i think this code is stylistically different but otherwise okay?
+	if(note == 'R') { return 0.0; }
+    switch (note) {
+        case 'C':
+            if (accidental == 0)   return 261.63;
+            if (accidental == '#') return 277.18; // C# = Db
+            if (accidental == 'b') return 246.94; // Cb = B3, awkward but valid-ish
+            break;
+
+        case 'D':
+            if (accidental == 0)   return 293.66;
+            if (accidental == '#') return 311.13; // D# = Eb
+            if (accidental == 'b') return 277.18; // Db = C#
+            break;
+
+        case 'E':
+            if (accidental == 0)   return 329.63;
+            if (accidental == '#') return 349.23; // E# = F
+            if (accidental == 'b') return 311.13; // Eb = D#
+            break;
+
+        case 'F':
+            if (accidental == 0)   return 349.23;
+            if (accidental == '#') return 369.99; // F# = Gb
+            if (accidental == 'b') return 329.63; // Fb = E
+            break;
+
+        case 'G':
+            if (accidental == 0)   return 392.00;
+            if (accidental == '#') return 415.30; // G# = Ab
+            if (accidental == 'b') return 369.99; // Gb = F#
+            break;
+
+        case 'A':
+            if (accidental == 0)   return 440.00;
+            if (accidental == '#') return 466.16; // A# = Bb
+            if (accidental == 'b') return 415.30; // Ab = G#
+            break;
+
+        case 'B':
+            if (accidental == 0)   return 493.88;
+            if (accidental == '#') return 523.25; // B# = C5
+            if (accidental == 'b') return 466.16; // Bb = A#
+            break;
+    }
+
+    fprintf(stderr, "invalid pitch\n");
+    exit(1);
+}
+void add_note(struct note ** notes, int * num_notes, struct note * pattern) {
+	(*num_notes)++;
+	*notes = realloc(*notes, sizeof(struct note) * (*num_notes));
+	memcpy(&((*notes)[(*num_notes) - 1]), pattern, sizeof(struct note));
+}
+void parse_notes(int * num_notes, struct note ** notes, char * code) {
+	double t = 0;
+	double bps = 4;    // beats per sec
+	double bl = 1/bps; // beat len
+	int octave = 4;
+	for(int i = 0; code[i] != 0; i++) {
+		if(code[i] == ' ') { continue; }
+
+		int note = code[i++];
+
+		int accidental = 0;
+		if(code[i] == 'b' || code[i] == '#') {
+			accidental = code[i++];
+			if (code[i] == 0) { goto error; }
+		}
+	
+		if(note != 'R') {
+				if(code[i] < '0' || code[i] > '9') { goto error; }
+				octave = code[i++] - '0';
+		}
+	
+		double duration = 1.0;
+		if(code[i] == ':') {
+			i++;
+			if (code[i] < '0' || code[i] > '9') { goto error; }
+			duration = code[i++] - '0';
+		}
+
+		if(code[i] != 0 && code[i] != ' ') { goto error; }
+
+		double freq = lookup_base_freq_4(note, accidental) * pow(2.0, octave - 4);
+		struct note note_defn;
+		note_defn.start = t;
+		note_defn.dur = duration * bl;
+		note_defn.freq = freq;
+		add_note(notes, num_notes, &note_defn);
+
+		t += bl * duration;
+
+		if(code[i] == 0) { break; }
+	}
+
+	return;
+
+error:
+	fprintf(stderr, "parser error -- invalid note format\n");
+	exit(1);
+}
+
 int main(int argc, char ** argv) {
-	double Gb3 = 184.997;
-	double A4  = 220.00;
-	double Bb4 = 233.082;
-	double C4  = 261.626;
-	double D4  = 293.665;
-	int num_notes = 16;
-	struct note notes[16] = {
-		{ 0.00, 0.25, Gb3},
-		{ 0.25, 0.25, Bb4},
-		{ 0.50, 0.25, C4},
-		{ 0.75, 0.75, D4},
-
-		{ 2.00, 0.25, Gb3},
-		{ 2.25, 0.25, Bb4},
-		{ 2.50, 0.25, C4},
-		{ 2.75, 0.75, D4},
-
-		{ 4.00, 0.25, Gb3},
-		{ 4.25, 0.25, Bb4},
-		{ 4.50, 0.25, C4},
-		{ 4.75, 0.50, D4},
-		{ 5.25, 0.50, Bb4},
-		{ 5.75, 0.50, Gb3},
-		{ 6.25, 0.50, Bb4},
-		{ 6.75, 1.50, A4},
-	};
+	int num_notes = 0;
+	struct note * notes = NULL;
+	parse_notes(&num_notes, &notes, argv[1]);
+	//"Gb3 Bb4 C4 D4:3 Gb3 Bb4 C4 D4:3 Gb3 Bb4 C4 D4:2 Bb4:2 Gb3:2 Bb4:2 A4:6");
 	
 	int len = (int) (((double) sample_rate) * total_run_length(num_notes, notes));
 	int16_t * samples = malloc(sizeof(int16_t) * len);
